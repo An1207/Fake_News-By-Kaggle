@@ -1,0 +1,39 @@
+{
+  "raw_rows": 117032,
+  "raw_rows_by_source": {
+    "welfake": 72134,
+    "isot": 44898
+  },
+  "canonical_labels": {
+    "0": "real",
+    "1": "fake"
+  },
+  "welfake_label_verification": {
+    "raw_fake_label": 1,
+    "raw_label_mapping": {
+      "1": "fake",
+      "0": "real"
+    },
+    "overlap_rows_used": 43775,
+    "raw_equals_canonical_agreement": 1.0,
+    "method": "normalized body matches against Fake.csv/True.csv"
+  },
+  "min_body_words": 20,
+  "empty_or_short_body_rows_removed": 3131,
+  "conflicting_body_groups_removed": 0,
+  "conflicting_label_rows_removed": 0,
+  "shared_unique_bodies_between_datasets": 38017,
+  "duplicate_body_rows_removed": 52356,
+  "clean_rows": 61545,
+  "clean_label_counts": {
+    "real": 34324,
+    "fake": 27221
+  },
+  "clean_provenance_counts": {
+    "isot|welfake": 38017,
+    "welfake": 23528
+  },
+  "groups": 60856,
+  "largest_group_rows": 14,
+  "near_duplicate_policy": "normalized title (>=5 words, >=30 chars) or first 80 body words; connected groups"
+}
