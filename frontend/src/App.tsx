@@ -207,7 +207,7 @@ export default function App() {
 
   return <div className="app-shell">
     <aside className="sidebar">
-      <a className="brand" href="/" aria-label="SAI 뉴스 워크스페이스"><span className="brand-symbol">s<span>ai</span><i /></span><span className="brand-label">NEWS WORKSPACE</span></a>
+      <a className="brand" href="/" aria-label="SAI 뉴스 워크스페이스"><span className="brand-symbol">S<span>AI</span><i /></span><span className="brand-label">NEWS WORKSPACE</span></a>
       <span className="sidebar-label">WORKSPACE</span>
       <nav aria-label="주 메뉴"><button className={tab === 'articles' ? 'nav-item active' : 'nav-item'} onClick={() => switchTab('articles')}><Icon name="archive" />뉴스 보관함<span>{stats?.articles ?? '–'}</span></button><button className={tab === 'history' ? 'nav-item active' : 'nav-item'} onClick={() => switchTab('history')}><Icon name="history" />분석 기록<span>{stats?.analyses ?? '–'}</span></button></nav>
       <div className="sidebar-project"><span className="eyebrow">SAI PROJECT / 01</span><h3>읽고, 비교하고,<br />근거를 남기다.</h3><p>뉴스와 분석 이력을<br />한 공간에서 관리하세요.</p><div className="project-lines"><span /><span /><span /><span /></div></div>
