@@ -16,6 +16,17 @@ export interface Capabilities {
   classifier_artifact_present: boolean
   summarizer_model: string
   message: string
+  classifier_model: string
+  model_comparison: {
+    baseline: ModelEvaluation
+    transformer: ModelEvaluation
+    recommended_model: 'baseline' | 'transformer'
+    test_accuracy_difference_percentage_points: number
+  } | null
+}
+interface ModelEvaluation {
+  model: string
+  test: { accuracy: number; macro_f1: number; rows: number }
 }
 export interface Analysis {
   id: string
@@ -25,10 +36,29 @@ export interface Analysis {
   mode: 'classify' | 'summarize' | 'both'
   status: 'queued' | 'running' | 'completed' | 'failed'
   language: string
-  classification: { status: string; display_label?: string; fake_score?: number; message?: string; note?: string; uncertain?: boolean } | null
+  classification: (Prediction & { models?: { baseline: Prediction; transformer: Prediction }; agreement?: boolean | null }) | null
   summary: { summary: string; model: string; note: string; chunks: number } | null
   error: string | null
   created_at: string
+}
+export interface Prediction {
+  status: string
+  display_label?: string
+  fake_score?: number
+  message?: string
+  note?: string
+  uncertain?: boolean
+  model?: string
+  explanation?: {
+    parameters: { decision_threshold: number; uncertainty_threshold: number; C: number; class_weight: string;
+      tfidf_features: number; ngram_range: number[]; encoder_dimensions: number; encoder_max_tokens: number | null;
+      embedding_weight: number | null; encoder_trainable: boolean | null }
+    input: { normalized_words: number; latin_letter_ratio: number; matched_tfidf_features: number }
+    intercept: number; tfidf_contribution: number; encoder_contribution: number; logit: number
+    toward_fake: { term: string; contribution: number }[]
+    toward_real: { term: string; contribution: number }[]
+    note: string
+  }
 }
 export type ArticleInput = Pick<Article, 'title' | 'body' | 'source_url' | 'language'>
 

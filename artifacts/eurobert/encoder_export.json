@@ -1,0 +1,16 @@
+{
+  "encoder": {
+    "model_id": "EuroBERT/EuroBERT-210m",
+    "revision": "6720a49834876b4ec5afcf6ef0d149a2c6501cce",
+    "max_length": 128,
+    "pooling": "masked-mean-l2",
+    "quantization": "none",
+    "threads": 2,
+    "backend": "onnx",
+    "onnx_path": "artifacts/eurobert/encoder.fp32.onnx",
+    "onnx_sha256": "fb1d5ddca40424a09f4a3e98af15841dad937f8f03b835d95c2665f1ef565339"
+  },
+  "validation_min_cosine": 0.9999998807907104,
+  "tokenizer_parity": true,
+  "precision": "float32"
+}

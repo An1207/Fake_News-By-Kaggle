@@ -9,6 +9,7 @@ class LocalAIService:
     def __init__(self, settings: Settings):
         self.settings = settings
         self._classifier = None
+        self._classifiers = {}
         self._load_lock = Lock()
 
     def analyze(self, title: str, body: str, mode: str, language: str) -> dict:
@@ -17,9 +18,23 @@ class LocalAIService:
             from news_ai.model import load_classifier, predict
 
             with self._load_lock:
-                if self._classifier is None:
+                for key, path in [("baseline", self.settings.baseline_classifier_path),
+                                  ("transformer", self.settings.transformer_classifier_path)]:
+                    if key not in self._classifiers and path.is_file():
+                        self._classifiers[key] = load_classifier(path)
+                selected = next((key for key, path in [
+                    ("baseline", self.settings.baseline_classifier_path),
+                    ("transformer", self.settings.transformer_classifier_path)]
+                    if path.resolve() == self.settings.classifier_path.resolve()), None)
+                if selected is None and self._classifier is None:
                     self._classifier = load_classifier(self.settings.classifier_path)
-            result["classification"] = predict(self._classifier, title, body)
+            models = {key: predict(bundle, title, body) for key, bundle in self._classifiers.items()}
+            for key in ["baseline", "transformer"]:
+                models.setdefault(key, {"status": "model_unavailable", "message": "모델 학습 파일이 아직 없습니다."})
+            primary = models[selected] if selected else predict(self._classifier, title, body)
+            comparable = all(value["status"] == "ok" for value in models.values())
+            result["classification"] = {**primary, "models": models, "selected_model": selected,
+                "agreement": models["baseline"]["label"] == models["transformer"]["label"] if comparable else None}
         if mode in {"summarize", "both"}:
             from news_ai.summarizer import OllamaSummarizer
 

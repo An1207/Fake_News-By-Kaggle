@@ -28,3 +28,16 @@ artifacts/ollama_*.json
 .tools/
 .codex/
 .agents/
+.hf-cache/
+*.joblib
+*.npy
+*.npz
+*.csv.gz
+artifacts/embedding_cache/
+artifacts/**/embedding_cache/
+artifacts/training_state.json
+*.onnx
+*.onnx.data
+*.log
+artifacts/**/training_state.json
+kernel.errors.txt

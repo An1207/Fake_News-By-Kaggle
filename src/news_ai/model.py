@@ -180,18 +180,57 @@ def predict(bundle: dict, title: str, text: str) -> dict:
         return {"status": "unsupported_language", "message": "분류 모델은 영어 데이터로 학습했습니다. 영어 기사를 입력해 주세요."}
     if word_count(content) < 20:
         return {"status": "insufficient_text", "message": "분류에는 제목과 본문을 합쳐 영어 단어 20개 이상이 필요합니다."}
-    vectorizer = bundle["pipeline"].named_steps["tfidf"]
+    steps = bundle["pipeline"].named_steps
+    vectorizer = dict(steps["features"].transformer_list)["tfidf"] if "encoder" in bundle else steps["tfidf"]
     features = vectorizer.transform([content])
     if features.nnz == 0:
         return {"status": "outside_vocabulary", "message": "학습한 어휘와 겹치는 표현이 없어 분류하지 못했습니다."}
+    if "encoder" in bundle:
+        from .transformer import augment, encoder_for
+
+        encoder = encoder_for(json.dumps(bundle["encoder"], sort_keys=True))
+        features = augment(features, encoder.encode([content]), bundle["embedding_weight"])
     classifier = bundle["pipeline"].named_steps["classifier"]
     fake_index = list(classifier.classes_).index(1)
     fake_score = float(classifier.predict_proba(features)[0, fake_index])
     label = int(fake_score >= 0.5)
+    # An exact decomposition of the final linear decision, not an LLM rationale.
+    coefficients = classifier.coef_[0] * (1 if fake_index == 1 else -1)
+    intercept = float(classifier.intercept_[0]) * (1 if fake_index == 1 else -1)
+    vocabulary_size = len(vectorizer.vocabulary_)
+    lexical = features[:, :vocabulary_size].tocsr()
+    contributions = lexical.data * coefficients[lexical.indices]
+    names = vectorizer.get_feature_names_out()
+    def strongest(direction):
+        indices = np.flatnonzero(contributions * direction > 0)
+        indices = indices[np.argsort(contributions[indices] * direction)[::-1]][:5]
+        return [{"term": str(names[lexical.indices[index]]),
+                 "contribution": float(contributions[index])} for index in indices]
+    tfidf_contribution = float(contributions.sum())
+    encoder_contribution = float(features[:, vocabulary_size:].dot(coefficients[vocabulary_size:])[0]) if "encoder" in bundle else 0.0
+    logit = intercept + tfidf_contribution + encoder_contribution
+    explanation = {
+        "method": "exact_linear_logit_decomposition",
+        "parameters": {"decision_threshold": 0.5, "uncertainty_threshold": 0.65,
+                       "C": float(classifier.C), "class_weight": classifier.class_weight,
+                       "tfidf_features": vocabulary_size, "ngram_range": list(vectorizer.ngram_range),
+                       "encoder_dimensions": len(coefficients) - vocabulary_size,
+                       "encoder_max_tokens": bundle.get("encoder", {}).get("max_length"),
+                       "embedding_weight": bundle.get("embedding_weight"),
+                       "encoder_trainable": False if "encoder" in bundle else None},
+        "input": {"normalized_words": word_count(content), "latin_letter_ratio": latin_ratio,
+                  "matched_tfidf_features": int(lexical.nnz)},
+        "intercept": intercept, "tfidf_contribution": tfidf_contribution,
+        "encoder_contribution": encoder_contribution, "logit": logit,
+        "toward_fake": strongest(1), "toward_real": strongest(-1),
+        "note": "기여도는 log-odds 단위입니다. 양수는 가짜 패턴, 음수는 진짜 패턴 방향이며 사실의 참·거짓 근거가 아닙니다. Transformer 값은 문맥 벡터 전체의 합산 기여도입니다.",
+    }
     return {
         "status": "ok", "label": label, "label_name": LABELS[label],
+        "model": bundle["metadata"].get("model", "TF-IDF + LogisticRegression"),
         "display_label": "가짜 뉴스 패턴에 가까움" if label else "진짜 뉴스 패턴에 가까움",
         "fake_score": fake_score, "real_score": 1 - fake_score,
         "uncertain": max(fake_score, 1 - fake_score) < 0.65,
+        "explanation": explanation,
         "note": "학습 데이터의 문체·어휘에 따른 모델 점수이며 사실 검증 결과가 아닙니다.",
     }

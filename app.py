@@ -8,6 +8,7 @@ import streamlit as st
 
 from news_ai.model import load_classifier, predict
 from news_ai.summarizer import OllamaError, OllamaSummarizer
+from news_ai.selection import recommended_classifier
 
 ROOT = Path(__file__).resolve().parent
 MODEL = ROOT / "artifacts" / "classifier.joblib"
@@ -23,6 +24,15 @@ def classifier(path: str, modified_ns: int):
 
 
 with st.sidebar:
+    model_options = {"TF-IDF + 로지스틱 회귀": ROOT / "artifacts" / "classifier.joblib"}
+    derived_path = ROOT / "artifacts" / "eurobert" / "classifier.joblib"
+    if derived_path.is_file():
+        model_options["EuroBERT + TF-IDF + 로지스틱 회귀"] = derived_path
+    preferred = recommended_classifier(ROOT / "artifacts")
+    if preferred.is_file() and preferred not in model_options.values():
+        model_options[f"{preferred.parent.name} + 로지스틱 회귀"] = preferred
+    choice = st.selectbox("분류 모델", list(model_options), index=list(model_options.values()).index(preferred))
+    MODEL = model_options[choice]
     st.header("요약 설정")
     llm_model = st.text_input("Ollama 모델", os.getenv("OLLAMA_MODEL", "exaone3.5:2.4b"))
     language = st.selectbox("요약 언어", ["한국어", "English"])
@@ -46,7 +56,7 @@ analysis_tab, evaluation_tab = st.tabs(["기사 분석", "학습 결과"])
 with analysis_tab:
     title = st.text_input("기사 제목 (선택)", key="article_title")
     body = st.text_area("기사 본문", height=300, placeholder="영어 뉴스 본문을 붙여 넣으세요.", key="article_body")
-    input_identity = (title, body, llm_model, language)
+    input_identity = (title, body, llm_model, language, str(MODEL))
     if st.session_state.get("result_identity") != input_identity:
         st.session_state.pop("classification", None)
         st.session_state.pop("summary", None)
@@ -59,7 +69,7 @@ with analysis_tab:
             with st.spinner("분류 중..."):
                 bundle = classifier(str(MODEL), MODEL.stat().st_mtime_ns)
                 st.session_state["classification"] = predict(bundle, title, body)
-        except (OSError, ValueError) as error:
+        except (OSError, ValueError, RuntimeError) as error:
             st.error(f"분류 모델을 불러오지 못했습니다: {error}")
             st.code(".venv\\Scripts\\python.exe -m news_ai train", language="powershell")
     if summary_clicked:
@@ -93,11 +103,25 @@ with analysis_tab:
     st.info("분류 모델은 과거 영어 뉴스의 문체·어휘 패턴을 학습했습니다. 한국어 뉴스와 최신 뉴스의 분류 성능은 검증되지 않았습니다.")
 
 with evaluation_tab:
-    metrics_file = ROOT / "artifacts" / "metrics.json"
+    comparison_file = ROOT / "artifacts" / "model_comparison.json"
+    if comparison_file.is_file():
+        comparison = json.loads(comparison_file.read_text(encoding="utf-8"))
+        st.subheader("동일한 테스트 기사로 모델 비교")
+        st.dataframe([
+            {"모델": comparison[key]["model"],
+             "정확도": f"{comparison[key]['test']['accuracy']:.2%}",
+             "Macro F1": round(comparison[key]["test"]["macro_f1"], 4),
+             "평가 기사": comparison[key]["test"]["rows"]}
+            for key in ["baseline", "transformer"]
+        ], hide_index=True)
+        st.caption(f"정확도 차이 {comparison['test_accuracy_difference_percentage_points']:+.2f}%p · 권장 모델은 검증 Macro F1으로 선택")
+    metrics_file = MODEL.parent / "metrics.json"
     if not metrics_file.exists():
         st.info("모델을 학습하면 평가 결과가 표시됩니다.")
     else:
         report = json.loads(metrics_file.read_text(encoding="utf-8"))
+        st.subheader("선택한 모델 상세")
+        st.caption(report["model"])
         accuracy, macro_f1, count = st.columns(3)
         accuracy.metric("테스트 정확도", f"{report['test']['accuracy']:.2%}")
         macro_f1.metric("테스트 Macro F1", f"{report['test']['macro_f1']:.4f}")

@@ -26,6 +26,7 @@ web = [
   "pydantic-settings>=2.7,<3",
   "alembic>=1.14,<2",
 ]
+transformer = ["torch>=2.8,<3", "transformers>=5.3,<6", "sentencepiece>=0.2,<1", "onnx>=1.17,<2", "onnxruntime>=1.20,<2", "openvino>=2025.1,<2027"]
 
 [project.scripts]
 news-ai = "news_ai.cli:main"
@@ -36,3 +37,11 @@ packages = ["src/news_ai", "src/news_api"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'win32' or sys_platform == 'linux'" }]

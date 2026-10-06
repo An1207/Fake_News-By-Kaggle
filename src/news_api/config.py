@@ -3,6 +3,7 @@ from pathlib import Path
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.engine import URL
+from news_ai.selection import recommended_classifier
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -17,7 +18,9 @@ class Settings(BaseSettings):
     mysql_password: SecretStr = SecretStr("")
     cors_origins: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
     ai_enabled: bool = False
-    classifier_path: Path = ROOT / "artifacts" / "classifier.joblib"
+    classifier_path: Path = Field(default_factory=lambda: recommended_classifier(ROOT / "artifacts"))
+    baseline_classifier_path: Path = ROOT / "artifacts" / "classifier.joblib"
+    transformer_classifier_path: Path = ROOT / "artifacts" / "eurobert" / "classifier.joblib"
     ollama_model: str = "exaone3.5:2.4b"
     ollama_base_url: str = "http://localhost:11434"
     ollama_timeout: float = Field(default=180, gt=0)

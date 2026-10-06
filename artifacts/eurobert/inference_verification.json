@@ -1,0 +1,10 @@
+{
+  "status": "passed",
+  "baseline_preserved": true,
+  "copied_tfidf_identical": true,
+  "saved_pipeline_matches_predict": true,
+  "test_rows": 6154,
+  "recommended_model": "transformer",
+  "inference_seconds_cold": 41.641,
+  "execution_min_cosine_against_original_fp32": 0.9999134302672145
+}

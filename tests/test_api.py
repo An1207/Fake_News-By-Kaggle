@@ -55,6 +55,22 @@ def create_article(client):
     return response.json()
 
 
+def test_capabilities_returns_aggregate_comparison_without_loading_encoder(client_factory, tmp_path, monkeypatch):
+    import json
+    monkeypatch.setattr("news_api.main.ROOT", tmp_path)
+    folder = tmp_path / "artifacts"
+    folder.mkdir()
+    report = {"identical_partitions": True, "recommended_model": "baseline",
+              "baseline": {"test": {"accuracy": .96, "rows": 6154}},
+              "transformer": {"test": {"accuracy": .95, "rows": 6154}}}
+    (folder / "model_comparison.json").write_text(json.dumps(report))
+    client, _, _ = client_factory()
+    response = client.get("/api/capabilities")
+    assert response.status_code == 200
+    assert response.json()["model_comparison"] == report
+    assert "classifier_path" not in response.json()
+
+
 def test_crud_unicode_pagination_and_literal_search(client_factory):
     client, _, _ = client_factory()
     article = create_article(client)

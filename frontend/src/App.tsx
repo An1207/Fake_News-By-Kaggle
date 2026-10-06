@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { api } from './api'
+import Predictions from './Predictions'
 import type { Analysis, Article, ArticleInput, ArticleItem, Capabilities, Page, Stats } from './api'
 
 const EMPTY_PAGE: Page<ArticleItem> = { items: [], total: 0, page: 1, page_size: 12 }
@@ -30,17 +31,25 @@ function date(value: string) {
 }
 function message(error: unknown) { return error instanceof Error ? error.message : '요청을 처리하지 못했습니다.' }
 
+function ModelComparison({ caps }: { caps: Capabilities | null }) {
+  const comparison = caps?.model_comparison
+  if (!comparison) return null
+  return <section className="model-comparison" aria-label="분류 모델 성능 비교">
+    <div><span className="eyebrow">MODEL COMPARISON</span><h2>같은 기사로 비교한 분류 성능</h2><p className="muted">테스트 {comparison.baseline.test.rows.toLocaleString()}건 · 기본 추천 {caps?.classifier_model}</p></div>
+    <div className="comparison-table-wrap"><table><thead><tr><th scope="col">모델</th><th scope="col">정확도</th><th scope="col">Macro F1</th></tr></thead><tbody>
+      {(['baseline', 'transformer'] as const).map(key => <tr key={key}><th scope="row">{key === 'baseline' ? 'TF-IDF + 로지스틱 회귀' : 'EuroBERT + TF-IDF + 로지스틱 회귀'}</th><td>{(comparison[key].test.accuracy * 100).toFixed(2)}%</td><td>{comparison[key].test.macro_f1.toFixed(4)}</td></tr>)}
+    </tbody></table></div>
+    <p className="muted">새 모델의 정확도 차이 {comparison.test_accuracy_difference_percentage_points >= 0 ? '+' : ''}{comparison.test_accuracy_difference_percentage_points.toFixed(2)}%p · 권장 모델은 검증 데이터의 Macro F1으로 선택합니다.</p>
+  </section>
+}
+
 function Results({ items, version, onOpen }: { items: Analysis[]; version?: number; onOpen?: (id: string) => void }) {
   if (!items.length) return <div className="result-empty"><Icon name="spark" size={24} /><p>아직 분석 기록이 없습니다.</p><span>AI 모델 연결 후 분류와 요약 결과를 이곳에서 확인할 수 있습니다.</span></div>
   return <div className="results">{items.map(job => <article className="result-card" key={job.id}>
-    <div className="result-top"><span className={`status ${job.status}`}>{STATUS_LABELS[job.status]}</span><span>{MODE_LABELS[job.mode]} · {date(job.created_at)}</span></div>
+    <div className="result-top"><span className={`status ${job.status}`}>{STATUS_LABELS[job.status]}</span><span>{job.classification?.models && job.mode === 'classify' ? '두 모델 비교' : MODE_LABELS[job.mode]} · {date(job.created_at)}</span></div>
     {onOpen ? <button className="history-title" onClick={() => onOpen(job.article_id)}>{job.article_title}<Icon name="arrow" size={16} /></button> : null}
     {version !== undefined && job.article_version !== version ? <p className="muted">이 결과는 수정 전 기사 v{job.article_version} 기준입니다.</p> : null}
-    {job.classification ? <div className="classification">
-      <strong>{job.classification.display_label ?? job.classification.message}</strong>
-      {job.classification.fake_score !== undefined ? <><div className="score-track"><span style={{ width: `${job.classification.fake_score * 100}%` }} /></div><p>가짜 뉴스 패턴 점수 {(job.classification.fake_score * 100).toFixed(1)}%{job.classification.uncertain ? ' · 판단 불확실' : ''}</p></> : null}
-      <p className="muted">{job.classification.note}</p>
-    </div> : null}
+    {job.classification ? <Predictions classification={job.classification} /> : null}
     {job.summary ? <div className="summary"><p>{job.summary.summary}</p><small>{job.summary.model} · {job.summary.note}</small></div> : null}
     {job.error ? <p className="inline-error">{job.error}</p> : null}
     {job.status === 'queued' || job.status === 'running' ? <p className="muted">완료되면 결과가 자동으로 표시됩니다. 다른 기사를 관리하며 기다릴 수 있습니다.</p> : null}
@@ -211,13 +220,14 @@ export default function App() {
         {error ? <div className="banner error" role="alert"><span>{error}</span><button onClick={() => setError('')} aria-label="오류 메시지 닫기">×</button></div> : null}
         {notice ? <div className="banner success" role="status"><span>{notice}</span><button onClick={() => setNotice('')} aria-label="알림 닫기">×</button></div> : null}
         <section className="stats-row" aria-label="워크스페이스 현황"><div><span>보관한 기사</span><strong>{stats?.articles ?? '–'}<small>건</small></strong><Icon name="archive" size={22} /></div><div><span>완료한 분석</span><strong>{stats?.completed ?? '–'}<small>건</small></strong><Icon name="spark" size={22} /></div><div><span>대기·진행 중</span><strong>{stats?.pending ?? '–'}<small>건</small></strong><Icon name="history" size={22} /></div></section>
+        <ModelComparison caps={caps} />
         {tab === 'articles' ? <div className="workspace-grid">
           <section className="article-library"><div className="library-heading"><h2>뉴스 보관함</h2><span>{articlePage.total} ARTICLES</span></div><form className="search-form" onSubmit={event => { event.preventDefault(); setQuery(search.trim()); setPage(1) }}><Icon name="search" size={18} /><input aria-label="기사 제목 검색" placeholder="제목으로 기사 찾기" value={search} onChange={event => setSearch(event.target.value)} /><button type="submit">검색</button></form>
             <div className="article-list" aria-busy={listLoading}>{listLoading ? <div className="library-empty">기사를 불러오는 중…</div> : articlePage.items.length ? articlePage.items.map((article, index) => <button className={selected?.id === article.id ? 'article-card selected' : 'article-card'} key={article.id} onClick={() => void openArticle(article.id)} disabled={busy}><div className="article-meta"><span>{String((page - 1) * 12 + index + 1).padStart(2, '0')}</span><span>{article.language === 'en' ? 'ENGLISH' : article.language === 'ko' ? 'KOREAN' : 'OTHER'} · {date(article.created_at)}</span></div><h3>{article.title}</h3><p>{article.preview}</p><div className="article-footer"><span>기사 열기</span><Icon name="arrow" size={17} /></div></button>) : <div className="library-empty"><span className="empty-number">01</span><h3>{query ? '검색 결과가 없습니다.' : '첫 번째 기사를 기다립니다.'}</h3><p>{query ? '다른 제목으로 검색해 보세요.' : '오른쪽에서 기사를 저장하면 이곳에 차곡차곡 쌓입니다.'}</p></div>}</div>
             <div className="pagination"><button disabled={page <= 1 || listLoading} onClick={() => setPage(value => value - 1)}>← 이전</button><span>{page} / {totalPages}</span><button disabled={page >= totalPages || listLoading} onClick={() => setPage(value => value + 1)}>다음 →</button></div>
           </section>
           <div className="detail-column">{detailLoading ? <div className="editor loading-panel">기사를 불러오는 중…</div> : <Editor key={selected ? `${selected.id}:${selected.version}` : `new:${editorRevision}`} article={selected} onSave={saveArticle} onDelete={deleteArticle} busy={busy} onDirty={setDirty} />}
-            <section className="analysis-panel"><div className="analysis-heading"><div><span className="eyebrow">NEXT / INSIGHT</span><h2>기사 분석</h2></div><Icon name="spark" size={24} /></div><p className="muted">{caps?.ai_enabled ? '저장한 원문에서 영어 뉴스 패턴을 분류하고 핵심 내용을 요약합니다.' : '기사를 먼저 모아 두세요. AI 모델 연결 후 분류와 요약을 사용할 수 있습니다.'}</p><div className="analysis-controls"><select aria-label="요약 언어" value={summaryLanguage} onChange={event => setSummaryLanguage(event.target.value)} disabled={!caps?.ai_enabled || busy}><option value="ko">한국어 요약</option><option value="en">영어 요약</option></select><button className="secondary" disabled={!selected || !caps?.ai_enabled || busy || dirty || hasPending} onClick={() => void analyze('classify')}>패턴 분류</button><button className="secondary" disabled={!selected || !caps?.ai_enabled || busy || dirty || hasPending} onClick={() => void analyze('summarize')}>내용 요약</button></div>{dirty && caps?.ai_enabled ? <p className="muted">변경 내용을 저장한 뒤 분석해 주세요.</p> : null}<Results items={jobs} version={selected?.version} /></section>
+            <section className="analysis-panel"><div className="analysis-heading"><div><span className="eyebrow">NEXT / INSIGHT</span><h2>기사 분석</h2></div><Icon name="spark" size={24} /></div><p className="muted">{caps?.ai_enabled ? '같은 영어 기사에 두 모델을 적용해 판정과 근거를 비교하고, 핵심 내용을 요약합니다.' : '기사를 먼저 모아 두세요. AI 모델 연결 후 분류와 요약을 사용할 수 있습니다.'}</p><div className="analysis-controls"><select aria-label="요약 언어" value={summaryLanguage} onChange={event => setSummaryLanguage(event.target.value)} disabled={!caps?.ai_enabled || busy}><option value="ko">한국어 요약</option><option value="en">영어 요약</option></select><button className="secondary" disabled={!selected || !caps?.ai_enabled || busy || dirty || hasPending} onClick={() => void analyze('classify')}>두 모델 비교</button><button className="secondary" disabled={!selected || !caps?.ai_enabled || busy || dirty || hasPending} onClick={() => void analyze('summarize')}>내용 요약</button></div>{dirty && caps?.ai_enabled ? <p className="muted">변경 내용을 저장한 뒤 분석해 주세요.</p> : null}<Results items={jobs} version={selected?.version} /></section>
           </div>
         </div> : <section className="history-panel"><div className="library-heading"><h2>분석 타임라인</h2><span>{history?.total ?? 0} RECORDS</span></div>{history ? <Results items={history.items} onOpen={id => void openArticle(id)} /> : <p className="muted">기록을 불러오는 중…</p>}<div className="pagination"><button disabled={historyPage <= 1} onClick={() => setHistoryPage(value => value - 1)}>← 이전</button><span>{historyPage} / {Math.max(1, Math.ceil((history?.total ?? 0) / 20))}</span><button disabled={historyPage * 20 >= (history?.total ?? 0)} onClick={() => setHistoryPage(value => value + 1)}>다음 →</button></div></section>}
         <footer className="page-footer"><span>SAI · SIGNAL, ARCHIVE, INSIGHT</span><span>뉴스 분류 점수와 요약은 사실 검증을 대신하지 않습니다.</span></footer>

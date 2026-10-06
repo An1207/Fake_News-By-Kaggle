@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+import json
 from threading import Lock
 from typing import Annotated
 
@@ -10,7 +11,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from .ai import LocalAIService
-from .config import Settings
+from .config import ROOT, Settings
 from .db import make_engine, make_sessions
 from .jobs import JobRunner
 from .models import Analysis, Article, utc_now
@@ -74,12 +75,22 @@ def create_app(settings: Settings | None = None, engine=None, service=None) -> F
 
     @app.get("/api/capabilities")
     def capabilities():
+        comparison_path = ROOT / "artifacts" / "model_comparison.json"
+        comparison = json.loads(comparison_path.read_text(encoding="utf-8")) if comparison_path.is_file() else None
+        metrics_path = settings.classifier_path.parent / "metrics.json"
+        model_name = json.loads(metrics_path.read_text(encoding="utf-8"))["model"] if metrics_path.is_file() else "분류 모델"
         return {
             "ai_enabled": settings.ai_enabled,
             "classifier_artifact_present": settings.classifier_path.is_file(),
             "summarizer_model": settings.ollama_model,
             "supported_classification_language": "en",
             "summary_languages": ["ko", "en"],
+            "classifier_model": model_name,
+            "classification_models_present": {
+                "baseline": settings.baseline_classifier_path.is_file(),
+                "transformer": settings.transformer_classifier_path.is_file(),
+            },
+            "model_comparison": comparison,
             "message": "AI 분석 사용 가능" if settings.ai_enabled else "AI 모델 연결 준비 단계입니다. 기사 저장과 관리는 사용할 수 있습니다.",
         }
 
