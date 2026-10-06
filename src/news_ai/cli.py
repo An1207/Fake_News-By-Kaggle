@@ -19,6 +19,8 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(description="SAI fake news classifier and Ollama summarizer")
     commands = parser.add_subparsers(dest="command", required=True)
+    compare = commands.add_parser("compare", help="Print model differences and saved held-out metrics without loading models")
+    compare.add_argument("--artifact-dir", type=Path, default=Path("artifacts"))
     download = commands.add_parser("download", help="Download both Kaggle datasets; preserve existing files")
     download.add_argument("--data-dir", type=Path, default=Path("data/raw"))
     prepare = commands.add_parser("prepare", help="Audit labels, duplicates and groups")
@@ -54,7 +56,11 @@ def main(argv: list[str] | None = None) -> int:
     status.add_argument("--llm-model", default=None)
     arguments = parser.parse_args(argv)
     try:
-        if arguments.command == "download":
+        if arguments.command == "compare":
+            from .comparison import comparison_text
+
+            print(comparison_text(arguments.artifact_dir))
+        elif arguments.command == "download":
             from .data import download_datasets
 
             download_datasets(arguments.data_dir)

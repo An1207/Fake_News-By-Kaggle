@@ -218,6 +218,10 @@ powershell -ExecutionPolicy Bypass -File scripts/train_transformer.ps1
 
 # 파생 모델 명시적 선택
 .venv\Scripts\python.exe -m news_ai predict --model artifacts/eurobert/classifier.joblib --file article.txt
+
+# 구조·학습·파라미터·정확도·오답 변화·한계를 CLI로 출력 (모델/LLM 실행 없음)
+.venv\Scripts\python.exe -X utf8 -m news_ai compare
+# 다른 평가 폴더: ... -m news_ai compare --artifact-dir artifacts
 ```
 
 새 모델은 `artifacts/eurobert/classifier.joblib`, 집계 평가는 `artifacts/eurobert/metrics.json`에 저장합니다. `.hf-cache/`와 ONNX 파일, 특징 캐시는 로컬에 보관하고 Git에는 올리지 않습니다. 새 환경에서는 데이터와 공개 가중치를 내려받고 다시 학습해야 합니다.
@@ -305,7 +309,7 @@ cd frontend
 npm.cmd run build
 ```
 
-- **Python 테스트 39개 통과**: 기존 28개 + 파생 모델·선택·특징 캐시·토크나이저 6개 + 비교 API 1개 + 선형 근거·두 모델 연결·파일 부재·JSON 저장 4개. 라벨·그룹 누수·입력 보류·요약 요청·실패 처리·수정 충돌·스냅샷·재시작 복구 등을 확인했습니다.
+- **Python 테스트 41개 통과**: 기존 28개 + 파생 모델·선택·특징 캐시·토크나이저 6개 + 비교 API 1개 + 선형 근거·두 모델 연결·파일 부재·JSON 저장 4개 + 비교 CLI 2개. 라벨·그룹 누수·입력 보류·요약 요청·실패 처리·수정 충돌·스냅샷·재시작 복구·평가 파일 불일치 거부 등을 확인했습니다.
 - **TypeScript·React 빌드 통과**, 브라우저 등록·수정·검색·분류 요청·결과 표시 확인, 데스크톱·모바일 화면 확인
 - **실제 MySQL 통합 검증 통과**: 한글·이모지·64KiB 초과 UTF-8 본문, 별도 연결의 저장 유지, JSON 이력, 버전 충돌, 기사 삭제 시 이력 cascade
 - **실제 분류기 + EXAONE 웹 연결 통과**: 가상 도서관 기사에서 분류·한국어 요약, DB 저장·재조회 확인. 첫 호출 약 34.5초
