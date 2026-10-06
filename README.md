@@ -111,7 +111,15 @@ cd Fake_News-By-Kaggle
 
 React 개발 서버가 `/api`를 FastAPI로 프록시합니다. DB·API 포트는 최초 환경의 기존 서비스와 충돌하지 않도록 13306·8001을 선택했습니다.
 
-컴퓨터 재시작 후에는 `docker compose -p sai-news up -d mysql`로 DB를 실행한 뒤 두 실행 스크립트를 사용합니다. 데이터는 named volume `sai-news_mysql_data`에 유지되며 `docker compose -p sai-news down`으로 컨테이너를 종료해도 보존됩니다.
+설치 후 재시작에는 프로젝트 루트에서 다음 명령을 사용할 수 있습니다.
+
+```powershell
+.\scripts\start_web.ps1
+```
+
+이 명령은 Docker Desktop과 프로젝트 MySQL을 준비하고 FastAPI·React를 숨김 백그라운드 프로세스로 실행합니다. 이미 사용 중인 포트는 중복 실행하지 않고 준비 상태를 검사합니다. 직접 API와 React 프록시의 `/api/health`까지 DB 연결 성공을 확인해야 완료로 표시합니다. 터미널별로 로그를 보며 개발하려면 기존 `run_api.ps1`, `run_frontend.ps1`을 사용합니다. 실행 로그는 공개 Git에서 제외되는 `.tools/server-logs/`에 저장합니다. 재시작 이후 열린 웹 페이지는 새로고침하거나 **연결 다시 확인**을 누릅니다.
+
+데이터는 named volume `sai-news_mysql_data`에 유지되며 `docker compose -p sai-news down`으로 컨테이너를 종료해도 보존됩니다. Windows 재부팅 이후에는 시작 명령을 다시 실행해야 합니다.
 
 DB 포트는 `.env`의 `MYSQL_PORT`로 바꾸고 Compose를 다시 적용합니다. API 포트 변경 시 `scripts/run_api.ps1`과 `frontend/vite.config.ts`의 프록시를 함께 수정합니다. 서비스는 로그인 없는 **로컬 개발용**으로 `127.0.0.1`에 바인딩합니다. 외부 배포에는 인증·권한·배포 구성이 필요합니다.
 
