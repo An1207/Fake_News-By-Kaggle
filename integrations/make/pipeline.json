@@ -1,0 +1,14 @@
+{
+  "name": "SAI news summary automation contract",
+  "enabled": false,
+  "format": "workflow-contract-not-make-import-blueprint",
+  "authentication": "Authorization: Bearer <AUTOMATION_API_KEY>",
+  "submit": {"method": "POST", "path": "/api/automation/news", "idempotency_field": "request_id"},
+  "poll": {"method": "GET", "path": "/api/automation/jobs/{analysis_id}", "terminal_statuses": ["completed", "failed"]},
+  "optional_gpt": {"enabled": false, "method": "POST", "path": "/api/automation/jobs/{analysis_id}/gpt-summary", "poll_field": "gpt_summary.status"},
+  "sheet_columns": ["news_id", "title", "body", "source_url", "language", "status", "analysis_id", "ollama_summary", "gpt_summary", "input_tokens", "output_tokens", "estimated_cost_usd", "error", "review_status", "review_note"],
+  "scenarios": [
+    {"name": "intake", "enabled": false, "steps": ["Sheets: read ready rows", "Filter: nonempty body and stable news_id", "HTTP: submit once", "Sheets: save analysis_id and queued status"]},
+    {"name": "results", "enabled": false, "steps": ["Sheets: read queued/running rows", "HTTP: poll saved analysis_id", "Sheets: save summaries, usage and status", "Human: compare summary with original and record review"]}
+  ]
+}

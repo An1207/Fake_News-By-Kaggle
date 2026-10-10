@@ -69,6 +69,16 @@ class AnalysisInput(BaseModel):
     language: Literal["ko", "en"] = "ko"
 
 
+class GPTSummaryOut(TimestampModel):
+    analysis_id: str
+    status: str
+    summary: dict | None
+    error: str | None
+    created_at: datetime
+    started_at: datetime | None
+    completed_at: datetime | None
+
+
 class AnalysisOut(TimestampModel):
     id: str
     article_id: str
@@ -79,6 +89,7 @@ class AnalysisOut(TimestampModel):
     status: str
     classification: dict | None
     summary: dict | None
+    gpt_summary: GPTSummaryOut | None = None
     error: str | None
     created_at: datetime
     started_at: datetime | None
@@ -90,3 +101,9 @@ class AnalysisPage(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+class AutomationInput(ArticleInput):
+    request_id: str = Field(min_length=1, max_length=128)
+    mode: Literal["summarize", "both"] = "summarize"
+    summary_language: Literal["ko", "en"] = "ko"

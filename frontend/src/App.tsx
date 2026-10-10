@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { api } from './api'
 import Predictions from './Predictions'
+import SummaryPanel from './SummaryPanel'
 import type { Analysis, Article, ArticleInput, ArticleItem, Capabilities, Page, Stats } from './api'
 
 const EMPTY_PAGE: Page<ArticleItem> = { items: [], total: 0, page: 1, page_size: 12 }
@@ -43,14 +44,14 @@ function ModelComparison({ caps }: { caps: Capabilities | null }) {
   </section>
 }
 
-function Results({ items, version, onOpen }: { items: Analysis[]; version?: number; onOpen?: (id: string) => void }) {
+function Results({ items, version, onOpen, caps, onGPTUpdate }: { items: Analysis[]; version?: number; onOpen?: (id: string) => void; caps: Capabilities | null; onGPTUpdate: (job: Analysis) => void }) {
   if (!items.length) return <div className="result-empty"><Icon name="spark" size={24} /><p>아직 분석 기록이 없습니다.</p><span>AI 모델 연결 후 분류와 요약 결과를 이곳에서 확인할 수 있습니다.</span></div>
   return <div className="results">{items.map(job => <article className="result-card" key={job.id}>
     <div className="result-top"><span className={`status ${job.status}`}>{STATUS_LABELS[job.status]}</span><span>{job.classification?.models && job.mode === 'classify' ? '두 모델 비교' : MODE_LABELS[job.mode]} · {date(job.created_at)}</span></div>
     {onOpen ? <button className="history-title" onClick={() => onOpen(job.article_id)}>{job.article_title}<Icon name="arrow" size={16} /></button> : null}
     {version !== undefined && job.article_version !== version ? <p className="muted">이 결과는 수정 전 기사 v{job.article_version} 기준입니다.</p> : null}
     {job.classification ? <Predictions classification={job.classification} /> : null}
-    {job.summary ? <div className="summary"><p>{job.summary.summary}</p><small>{job.summary.model} · {job.summary.note}</small></div> : null}
+    {job.summary ? <SummaryPanel job={job} caps={caps} onUpdate={onGPTUpdate} /> : null}
     {job.error ? <p className="inline-error">{job.error}</p> : null}
     {job.status === 'queued' || job.status === 'running' ? <p className="muted">완료되면 결과가 자동으로 표시됩니다. 다른 기사를 관리하며 기다릴 수 있습니다.</p> : null}
   </article>)}</div>
@@ -103,8 +104,8 @@ export default function App() {
   const [editorRevision, setEditorRevision] = useState(0)
   const [summaryLanguage, setSummaryLanguage] = useState('ko')
   const selectionRequest = useRef(0)
-  const hasPending = jobs.some(job => job.status === 'queued' || job.status === 'running')
-  const historyPending = history?.items.some(job => job.status === 'queued' || job.status === 'running') ?? false
+  const hasPending = jobs.some(job => job.status === 'queued' || job.status === 'running' || job.gpt_summary?.status === 'queued' || job.gpt_summary?.status === 'running')
+  const historyPending = history?.items.some(job => job.status === 'queued' || job.status === 'running' || job.gpt_summary?.status === 'queued' || job.gpt_summary?.status === 'running') ?? false
 
   useEffect(() => {
     if (!dirty) return
@@ -201,6 +202,10 @@ export default function App() {
     } catch (reason) { setError(message(reason)) }
     finally { setBusy(false) }
   }
+  function updateGPT(updated: Analysis) {
+    setJobs(previous => previous.map(job => job.id === updated.id ? updated : job))
+    setHistory(previous => previous ? { ...previous, items: previous.items.map(job => job.id === updated.id ? updated : job) } : previous)
+  }
 
   const connectionText = health === 'online' ? '저장소 연결됨' : health === 'offline' ? '연결 확인 필요' : '연결 중'
   const totalPages = Math.max(1, Math.ceil(articlePage.total / articlePage.page_size))
@@ -227,9 +232,9 @@ export default function App() {
             <div className="pagination"><button disabled={page <= 1 || listLoading} onClick={() => setPage(value => value - 1)}>← 이전</button><span>{page} / {totalPages}</span><button disabled={page >= totalPages || listLoading} onClick={() => setPage(value => value + 1)}>다음 →</button></div>
           </section>
           <div className="detail-column">{detailLoading ? <div className="editor loading-panel">기사를 불러오는 중…</div> : <Editor key={selected ? `${selected.id}:${selected.version}` : `new:${editorRevision}`} article={selected} onSave={saveArticle} onDelete={deleteArticle} busy={busy} onDirty={setDirty} />}
-            <section className="analysis-panel"><div className="analysis-heading"><div><span className="eyebrow">NEXT / INSIGHT</span><h2>기사 분석</h2></div><Icon name="spark" size={24} /></div><p className="muted">{caps?.ai_enabled ? '같은 영어 기사에 두 모델을 적용해 판정과 근거를 비교하고, 핵심 내용을 요약합니다.' : '기사를 먼저 모아 두세요. AI 모델 연결 후 분류와 요약을 사용할 수 있습니다.'}</p><div className="analysis-controls"><select aria-label="요약 언어" value={summaryLanguage} onChange={event => setSummaryLanguage(event.target.value)} disabled={!caps?.ai_enabled || busy}><option value="ko">한국어 요약</option><option value="en">영어 요약</option></select><button className="secondary" disabled={!selected || !caps?.ai_enabled || busy || dirty || hasPending} onClick={() => void analyze('classify')}>두 모델 비교</button><button className="secondary" disabled={!selected || !caps?.ai_enabled || busy || dirty || hasPending} onClick={() => void analyze('summarize')}>내용 요약</button></div>{dirty && caps?.ai_enabled ? <p className="muted">변경 내용을 저장한 뒤 분석해 주세요.</p> : null}<Results items={jobs} version={selected?.version} /></section>
+            <section className="analysis-panel"><div className="analysis-heading"><div><span className="eyebrow">NEXT / INSIGHT</span><h2>기사 분석</h2></div><Icon name="spark" size={24} /></div><p className="muted">{caps?.ai_enabled ? '같은 영어 기사에 두 모델을 적용해 판정과 근거를 비교하고, 핵심 내용을 요약합니다.' : '기사를 먼저 모아 두세요. AI 모델 연결 후 분류와 요약을 사용할 수 있습니다.'}</p><div className="analysis-controls"><select aria-label="요약 언어" value={summaryLanguage} onChange={event => setSummaryLanguage(event.target.value)} disabled={!caps?.ai_enabled || busy}><option value="ko">한국어 요약</option><option value="en">영어 요약</option></select><button className="secondary" disabled={!selected || !caps?.ai_enabled || busy || dirty || hasPending} onClick={() => void analyze('classify')}>두 모델 비교</button><button className="secondary" disabled={!selected || !caps?.ai_enabled || busy || dirty || hasPending} onClick={() => void analyze('summarize')}>내용 요약</button></div>{dirty && caps?.ai_enabled ? <p className="muted">변경 내용을 저장한 뒤 분석해 주세요.</p> : null}<Results items={jobs} version={selected?.version} caps={caps} onGPTUpdate={updateGPT} /></section>
           </div>
-        </div> : <section className="history-panel"><div className="library-heading"><h2>분석 타임라인</h2><span>{history?.total ?? 0} RECORDS</span></div>{history ? <Results items={history.items} onOpen={id => void openArticle(id)} /> : <p className="muted">기록을 불러오는 중…</p>}<div className="pagination"><button disabled={historyPage <= 1} onClick={() => setHistoryPage(value => value - 1)}>← 이전</button><span>{historyPage} / {Math.max(1, Math.ceil((history?.total ?? 0) / 20))}</span><button disabled={historyPage * 20 >= (history?.total ?? 0)} onClick={() => setHistoryPage(value => value + 1)}>다음 →</button></div></section>}
+        </div> : <section className="history-panel"><div className="library-heading"><h2>분석 타임라인</h2><span>{history?.total ?? 0} RECORDS</span></div>{history ? <Results items={history.items} onOpen={id => void openArticle(id)} caps={caps} onGPTUpdate={updateGPT} /> : <p className="muted">기록을 불러오는 중…</p>}<div className="pagination"><button disabled={historyPage <= 1} onClick={() => setHistoryPage(value => value - 1)}>← 이전</button><span>{historyPage} / {Math.max(1, Math.ceil((history?.total ?? 0) / 20))}</span><button disabled={historyPage * 20 >= (history?.total ?? 0)} onClick={() => setHistoryPage(value => value + 1)}>다음 →</button></div></section>}
         <footer className="page-footer"><span>SAI · SIGNAL, ARCHIVE, INSIGHT</span><span>뉴스 분류 점수와 요약은 사실 검증을 대신하지 않습니다.</span></footer>
       </div>
     </main>

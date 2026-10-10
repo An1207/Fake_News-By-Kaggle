@@ -51,3 +51,27 @@ class Analysis(Base):
     started_at: Mapped[datetime | None] = mapped_column(nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(nullable=True)
     article: Mapped[Article] = relationship(back_populates="analyses")
+    gpt_summary: Mapped["GPTSummary | None"] = relationship(lazy="selectin", passive_deletes=True)
+
+
+class GPTSummary(Base):
+    __tablename__ = "gpt_summaries"
+    __table_args__ = (CheckConstraint("status IN ('queued', 'running', 'completed', 'failed')", name="ck_gpt_status"),
+                      Index("ix_gpt_status", "status"))
+
+    analysis_id: Mapped[str] = mapped_column(ForeignKey("analyses.id", ondelete="CASCADE"), primary_key=True)
+    status: Mapped[str] = mapped_column(String(16), default="queued")
+    summary: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(default=utc_now)
+    started_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(nullable=True)
+
+
+class AutomationRequest(Base):
+    __tablename__ = "automation_requests"
+
+    request_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    payload_hash: Mapped[str] = mapped_column(String(64))
+    analysis_id: Mapped[str] = mapped_column(ForeignKey("analyses.id", ondelete="CASCADE"))
+    created_at: Mapped[datetime] = mapped_column(default=utc_now)

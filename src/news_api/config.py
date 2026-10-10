@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     mysql_database: str = "sai_news"
     mysql_user: str = "sai_app"
     mysql_password: SecretStr = SecretStr("")
+    api_port: int = Field(default=8011, ge=1, le=65535)
     cors_origins: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
     ai_enabled: bool = False
     classifier_path: Path = Field(default_factory=lambda: recommended_classifier(ROOT / "artifacts"))
@@ -24,6 +25,15 @@ class Settings(BaseSettings):
     ollama_model: str = "exaone3.5:2.4b"
     ollama_base_url: str = "http://localhost:11434"
     ollama_timeout: float = Field(default=180, gt=0)
+    openai_api_key: SecretStr = SecretStr("")
+    openai_timeout: float = Field(default=90, gt=0)
+    openai_max_output_tokens: int = Field(default=1000, ge=100, le=2000)
+    automation_enabled: bool = False
+    automation_api_key: SecretStr = SecretStr("")
+
+    @property
+    def gpt_available(self) -> bool:
+        return self.ai_enabled and bool(self.openai_api_key.get_secret_value().strip())
 
     @property
     def database_url(self) -> URL:

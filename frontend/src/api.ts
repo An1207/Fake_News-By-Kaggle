@@ -15,6 +15,9 @@ export interface Capabilities {
   ai_enabled: boolean
   classifier_artifact_present: boolean
   summarizer_model: string
+  gpt_summary_available: boolean
+  gpt_summary_model: string
+  automation_enabled: boolean
   message: string
   classifier_model: string
   model_comparison: {
@@ -37,9 +40,15 @@ export interface Analysis {
   status: 'queued' | 'running' | 'completed' | 'failed'
   language: string
   classification: (Prediction & { models?: { baseline: Prediction; transformer: Prediction }; agreement?: boolean | null }) | null
-  summary: { summary: string; model: string; note: string; chunks: number } | null
+  summary: SummaryResult | null
+  gpt_summary: { status: Analysis['status']; summary: SummaryResult | null; error: string | null } | null
   error: string | null
   created_at: string
+}
+export interface SummaryResult {
+  summary: string; model: string; note: string; chunks: number
+  usage?: { input_tokens: number; output_tokens: number; total_tokens: number; cached_input_tokens: number }
+  estimated_cost_usd?: number
 }
 export interface Prediction {
   status: string
@@ -94,4 +103,5 @@ export const api = {
   analyze: (id: string, mode: Analysis['mode'], language: string) => request<Analysis>(`/articles/${id}/analyses`, {
     method: 'POST', body: JSON.stringify({ mode, language }),
   }),
+  gptSummary: (id: string, retry = false) => request<Analysis>(`/analyses/${id}/gpt-summary${retry ? '?retry=true' : ''}`, { method: 'POST' }),
 }

@@ -2,7 +2,7 @@ from threading import BoundedSemaphore
 
 from sqlalchemy import update
 
-from .models import Analysis, utc_now
+from .models import Analysis, GPTSummary, utc_now
 
 
 class JobRunner:
@@ -17,6 +17,10 @@ class JobRunner:
         with self.sessions() as session:
             session.execute(update(Analysis).where(Analysis.status.in_(["queued", "running"])).values(
                 status="failed", error="서버 재시작으로 분석이 중단됐습니다. 다시 실행해 주세요.",
+                completed_at=utc_now(),
+            ))
+            session.execute(update(GPTSummary).where(GPTSummary.status.in_(["queued", "running"])).values(
+                status="failed", error="서버 재시작으로 GPT 요약이 중단됐습니다. API 사용량 확인 후 다시 실행하세요.",
                 completed_at=utc_now(),
             ))
             session.commit()
@@ -53,4 +57,31 @@ class JobRunner:
                     job.status = "completed"
                     job.classification = result.get("classification")
                     job.summary = result.get("summary")
+                session.commit()
+
+    def run_gpt(self, analysis_id: str):
+        with self.gate:
+            with self.sessions() as session:
+                extra = session.get(GPTSummary, analysis_id)
+                parent = session.get(Analysis, analysis_id)
+                if extra is None or parent is None or extra.status != "queued":
+                    return
+                extra.status = "running"
+                extra.started_at = utc_now()
+                arguments = (parent.article_title, parent.article_body, parent.language)
+                session.commit()
+            try:
+                result = self.service.summarize_gpt(*arguments)
+                error = None
+            except (OSError, ValueError, RuntimeError) as exception:
+                result, error = None, str(exception)[:2000]
+            except Exception:
+                result, error = None, "GPT 요약 중 오류가 발생했습니다. API 사용량과 서버 설정을 확인하세요."
+            with self.sessions() as session:
+                extra = session.get(GPTSummary, analysis_id)
+                if extra is None:
+                    return
+                extra.status = "failed" if error else "completed"
+                extra.summary, extra.error = result, error
+                extra.completed_at = utc_now()
                 session.commit()

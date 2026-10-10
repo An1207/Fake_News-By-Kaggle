@@ -1,0 +1,9 @@
+{
+  "request_id": "demo-sheet:news-001:v1",
+  "title": "Fictional library renovation plan",
+  "body": "This is a fictional article for testing. Cedar City Council approved a library renovation plan. Construction is planned for next September and has not started. The library will remain open during most of the work.",
+  "source_url": null,
+  "language": "en",
+  "mode": "summarize",
+  "summary_language": "ko"
+}

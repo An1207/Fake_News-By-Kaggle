@@ -1,21 +1,23 @@
 from contextlib import asynccontextmanager
 import json
+from hashlib import sha256
+from hmac import compare_digest
 from threading import Lock
 from typing import Annotated
 
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request, Response
+from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import func, select, text, update
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from .ai import LocalAIService
 from .config import ROOT, Settings
 from .db import make_engine, make_sessions
 from .jobs import JobRunner
-from .models import Analysis, Article, utc_now
-from .schemas import AnalysisInput, AnalysisOut, AnalysisPage, ArticleInput, ArticleListItem, ArticleOut, ArticlePage, ArticleUpdate
+from .models import Analysis, Article, AutomationRequest, GPTSummary, utc_now
+from .schemas import AnalysisInput, AnalysisOut, AnalysisPage, ArticleInput, ArticleListItem, ArticleOut, ArticlePage, ArticleUpdate, AutomationInput
 
 
 def failure(code: str, message: str, status: int = 409):
@@ -28,6 +30,24 @@ def db_session(request: Request):
 
 
 DB = Annotated[Session, Depends(db_session)]
+
+
+def require_automation(request: Request, authorization: Annotated[str | None, Header()] = None):
+    settings = request.app.state.settings
+    if not settings.automation_enabled:
+        raise failure("AUTOMATION_DISABLED", "자동화 파이프라인은 현재 비활성 상태입니다.", 503)
+    key = settings.automation_api_key.get_secret_value()
+    if len(key) < 32:
+        raise failure("AUTOMATION_NOT_CONFIGURED", "자동화 인증 키 설정을 확인하세요.", 503)
+    if not authorization or not compare_digest(authorization.encode(), ("Bearer " + key).encode()):
+        raise failure("AUTOMATION_UNAUTHORIZED", "자동화 인증에 실패했습니다.", 401)
+
+
+def ensure_queue_space(session: Session):
+    pending = session.scalar(select(func.count()).select_from(Analysis).where(Analysis.status.in_(["queued", "running"])))
+    pending += session.scalar(select(func.count()).select_from(GPTSummary).where(GPTSummary.status.in_(["queued", "running"])))
+    if pending >= 10:
+        raise failure("QUEUE_FULL", "분석 대기열이 가득 찼습니다. 잠시 후 다시 시도해 주세요.", 429)
 
 
 def article_or_404(session: Session, article_id: str, *, lock: bool = False) -> Article:
@@ -83,6 +103,10 @@ def create_app(settings: Settings | None = None, engine=None, service=None) -> F
             "ai_enabled": settings.ai_enabled,
             "classifier_artifact_present": settings.classifier_path.is_file(),
             "summarizer_model": settings.ollama_model,
+            "default_summary_provider": "ollama",
+            "gpt_summary_available": settings.gpt_available,
+            "gpt_summary_model": "gpt-4o-mini",
+            "automation_enabled": settings.automation_enabled,
             "supported_classification_language": "en",
             "summary_languages": ["ko", "en"],
             "classifier_model": model_name,
@@ -97,9 +121,11 @@ def create_app(settings: Settings | None = None, engine=None, service=None) -> F
     @app.get("/api/stats")
     def stats(session: DB):
         counts = dict(session.execute(select(Analysis.status, func.count()).group_by(Analysis.status)).all())
+        extras = dict(session.execute(select(GPTSummary.status, func.count()).group_by(GPTSummary.status)).all())
         return {"articles": session.scalar(select(func.count()).select_from(Article)),
                 "analyses": sum(counts.values()), "completed": counts.get("completed", 0),
-                "pending": counts.get("queued", 0) + counts.get("running", 0), "failed": counts.get("failed", 0)}
+                "pending": counts.get("queued", 0) + counts.get("running", 0) + extras.get("queued", 0) + extras.get("running", 0),
+                "failed": counts.get("failed", 0), "gpt_completed": extras.get("completed", 0)}
 
     @app.post("/api/articles", response_model=ArticleOut, status_code=201)
     def create_article(payload: ArticleInput, session: DB):
@@ -154,6 +180,9 @@ def create_app(settings: Settings | None = None, engine=None, service=None) -> F
         ).limit(1))
         if active:
             raise failure("ANALYSIS_ACTIVE", "분석이 끝난 뒤 기사를 삭제할 수 있습니다.")
+        if session.scalar(select(GPTSummary.analysis_id).join(Analysis).where(
+            Analysis.article_id == article_id, GPTSummary.status.in_(["queued", "running"])).limit(1)):
+            raise failure("ANALYSIS_ACTIVE", "GPT 요약이 끝난 뒤 기사를 삭제할 수 있습니다.")
         session.delete(article)
         session.commit()
         return Response(status_code=204)
@@ -168,10 +197,7 @@ def create_app(settings: Settings | None = None, engine=None, service=None) -> F
                 Analysis.article_id == article_id, Analysis.status.in_(["queued", "running"]),
             ).limit(1)):
                 raise failure("ANALYSIS_ACTIVE", "이 기사의 분석이 이미 진행 중입니다.")
-            if session.scalar(select(func.count()).select_from(Analysis).where(
-                Analysis.status.in_(["queued", "running"]),
-            )) >= 10:
-                raise failure("QUEUE_FULL", "분석 대기열이 가득 찼습니다. 잠시 후 다시 시도해 주세요.", 429)
+            ensure_queue_space(session)
             job = Analysis(article_id=article.id, article_version=article.version,
                            article_title=article.title, article_body=article.body,
                            mode=payload.mode, language=payload.language)
@@ -200,6 +226,85 @@ def create_app(settings: Settings | None = None, engine=None, service=None) -> F
         if job is None:
             raise failure("ANALYSIS_NOT_FOUND", "분석 기록을 찾을 수 없습니다.", 404)
         return job
+
+    @app.post("/api/analyses/{analysis_id}/gpt-summary", response_model=AnalysisOut, status_code=202)
+    def start_gpt_summary(analysis_id: str, background: BackgroundTasks, session: DB,
+                          response: Response, retry: bool = False):
+        with app.state.enqueue_lock:
+            parent = get_analysis(analysis_id, session)
+            article_or_404(session, parent.article_id, lock=True)
+            if parent.status != "completed" or parent.mode not in {"summarize", "both"} or not parent.summary:
+                raise failure("OLLAMA_SUMMARY_REQUIRED", "Ollama 요약이 완료된 뒤 GPT 추가 요약을 사용할 수 있습니다.")
+            extra = session.get(GPTSummary, analysis_id)
+            if extra and extra.status in {"queued", "running", "completed"}:
+                response.status_code = 200
+                return parent
+            if not settings.gpt_available:
+                raise failure("GPT_NOT_CONFIGURED", "AI 활성화와 백엔드 OPENAI_API_KEY 등록 후 서버를 재시작하세요.")
+            if extra and not retry:
+                raise failure("GPT_RETRY_REQUIRED", "실패한 요청입니다. API 사용량 확인 후 명시적으로 재시도하세요.")
+            ensure_queue_space(session)
+            if extra:
+                extra.status, extra.error, extra.summary = "queued", None, None
+                extra.started_at = extra.completed_at = None
+            else:
+                session.add(GPTSummary(analysis_id=analysis_id))
+            session.commit()
+            session.expire_all()
+            output = AnalysisOut.model_validate(get_analysis(analysis_id, session))
+            background.add_task(runner.run_gpt, analysis_id)
+            return output
+
+    @app.post("/api/automation/news", response_model=AnalysisOut, status_code=202,
+              dependencies=[Depends(require_automation)])
+    def automation_news(payload: AutomationInput, background: BackgroundTasks, session: DB, response: Response):
+        request_hash = sha256(payload.request_id.encode()).hexdigest()
+        values = payload.model_dump(mode="json", exclude={"request_id"})
+        payload_hash = sha256(json.dumps(values, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+
+        def existing_result(existing):
+            if existing.payload_hash != payload_hash:
+                raise failure("IDEMPOTENCY_CONFLICT", "동일 request_id에 다른 내용을 전송했습니다.")
+            response.status_code = 200
+            return get_analysis(existing.analysis_id, session)
+
+        with app.state.enqueue_lock:
+            existing = session.get(AutomationRequest, request_hash)
+            if existing:
+                return existing_result(existing)
+            if not settings.ai_enabled:
+                raise failure("AI_NOT_ENABLED", "자동화 처리에는 AI_ENABLED=true가 필요합니다.")
+            ensure_queue_space(session)
+            article = Article(**{key: values[key] for key in ("title", "body", "source_url", "language")})
+            session.add(article)
+            session.flush()
+            job = Analysis(article_id=article.id, article_version=article.version,
+                           article_title=article.title, article_body=article.body,
+                           mode=payload.mode, language=payload.summary_language)
+            session.add(job)
+            session.flush()
+            session.add(AutomationRequest(request_hash=request_hash, payload_hash=payload_hash, analysis_id=job.id))
+            try:
+                session.commit()
+            except IntegrityError:
+                session.rollback()
+                existing = session.get(AutomationRequest, request_hash)
+                if existing is None:
+                    raise
+                return existing_result(existing)
+            output = AnalysisOut.model_validate(job)
+            background.add_task(runner.run, job.id)
+            return output
+
+    @app.get("/api/automation/jobs/{analysis_id}", response_model=AnalysisOut,
+             dependencies=[Depends(require_automation)])
+    def automation_job(analysis_id: str, session: DB):
+        return get_analysis(analysis_id, session)
+
+    @app.post("/api/automation/jobs/{analysis_id}/gpt-summary", response_model=AnalysisOut, status_code=202,
+              dependencies=[Depends(require_automation)])
+    def automation_gpt(analysis_id: str, background: BackgroundTasks, session: DB, response: Response, retry: bool = False):
+        return start_gpt_summary(analysis_id, background, session, response, retry)
 
     return app
 

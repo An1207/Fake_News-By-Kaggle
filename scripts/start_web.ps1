@@ -45,11 +45,16 @@ try {
     docker compose -p sai-news up -d --wait --wait-timeout $TimeoutSeconds mysql
     if ($LASTEXITCODE -ne 0) { throw 'Project MySQL is not healthy. Check Docker Desktop.' }
 
-    $apiUrl = 'http://127.0.0.1:8001/api/health'
-    if (-not (Test-Listening 8001)) {
+    & (Join-Path $projectRoot '.venv/Scripts/python.exe') -m alembic -c backend/alembic.ini upgrade head
+    if ($LASTEXITCODE -ne 0) { throw 'Database migration failed. Check MySQL settings.' }
+
+    $apiPort = & (Join-Path $projectRoot '.venv/Scripts/python.exe') -c 'from news_api.config import Settings; print(Settings().api_port)'
+    if ($LASTEXITCODE -ne 0) { throw 'Cannot read API port configuration.' }
+    $apiUrl = "http://127.0.0.1:$apiPort/api/health"
+    if (-not (Test-Listening ([int]$apiPort))) {
         $stamp = Get-Date -Format 'yyyyMMdd-HHmmss-fff'
         $apiProcess = Start-Process -FilePath (Join-Path $projectRoot '.venv/Scripts/python.exe') `
-            -ArgumentList @('-m', 'uvicorn', 'news_api.main:app', '--host', '127.0.0.1', '--port', '8001') `
+            -ArgumentList @('-m', 'uvicorn', 'news_api.main:app', '--host', '127.0.0.1', '--port', $apiPort) `
             -WorkingDirectory $projectRoot -WindowStyle Hidden `
             -RedirectStandardOutput (Join-Path $logRoot "api-$stamp.stdout.log") `
             -RedirectStandardError (Join-Path $logRoot "api-$stamp.stderr.log") -PassThru

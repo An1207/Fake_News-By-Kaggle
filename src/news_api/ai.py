@@ -43,3 +43,10 @@ class LocalAIService:
                 timeout=self.settings.ollama_timeout,
             ).summarize(title, body, language).to_dict()
         return result
+
+    def summarize_gpt(self, title: str, body: str, language: str) -> dict:
+        from news_ai.openai_summary import OpenAISummarizer
+
+        return OpenAISummarizer(self.settings.openai_api_key.get_secret_value(),
+                                timeout=self.settings.openai_timeout,
+                                max_output_tokens=self.settings.openai_max_output_tokens).summarize(title, body, language)
