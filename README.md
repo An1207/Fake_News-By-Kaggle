@@ -1,6 +1,6 @@
 # Fake_News(By-Kaggle)
 
-두 Kaggle 데이터셋으로 학습한 영어 뉴스 분류기와 **Ollama 기본 요약·GPT-4o-mini 추가 요약**을 연결한 SAI 뉴스 워크스페이스입니다. React에서 기사를 관리하고 FastAPI가 AI를 직접 호출하며, MySQL에 기사·분석 이력·GPT 토큰 사용량을 저장합니다. Make 연동용 자동화 파이프라인도 구현했으며 현재 비활성 상태입니다.
+두 Kaggle 데이터셋으로 학습한 영어 뉴스 분류기와 **Ollama 기본 요약·GPT-4o-mini 추가 요약**을 연결한 SAI 뉴스 워크스페이스입니다. React에서 기사를 관리하고 FastAPI가 AI를 직접 호출하며, MySQL에 기사·분석 이력·GPT 토큰 사용량을 저장합니다. **Make·Google Sheets SaaS 연동용 파이프라인도 구축했습니다. 현재는 FastAPI 직접 호출로 서비스하며, Make는 비활성 상태로 두고 향후 연결 설정 후 자동화를 가동할 수 있도록 준비했습니다.**
 
 > 분류 점수는 학습 데이터의 문체·어휘 패턴에 따른 모델 점수입니다. 사실의 참·거짓 확률이 아니며, 요약도 외부 사실 검증을 수행하지 않습니다.
 
@@ -285,11 +285,13 @@ React에서 기사를 저장한 뒤 **두 모델 비교**를 누르면 각 모�
 
 이 결과는 **과거 영어 데이터 내부 그룹 분할 성능**입니다. 한국어·최신 뉴스·언론사·시간별 외부 일반화 성능으로 해석할 수 없습니다. 정리된 ISOT 기사는 모두 WELFake에도 포함돼 원본 117,032행을 고유 기사 수로 볼 수 없습니다.
 
-## 뉴스 요약: 로컬 LLM과 GPT API 확장
+## 뉴스 요약: Ollama 기본 요약과 GPT LLM 도입
 
-**Ollama 로컬 LLM을 기본으로 유지하면서 OpenAI GPT-4o-mini를 선택적 뉴스 요약 경로로 도입했습니다.** React의 추가 요약 버튼 → FastAPI의 OpenAI Responses API 호출 → MySQL의 결과·토큰 저장 → React의 두 요약 표시로 연결했습니다. 로컬 요약을 먼저 읽은 뒤 필요한 기사에만 GPT를 호출해 API 사용량을 제어하고, 두 제공자는 같은 원문 스냅샷을 사용합니다.
+**기존 Ollama 로컬 LLM 요약 기능을 유지하고, OpenAI의 GPT-4o-mini LLM을 추가 요약 모델로 도입했습니다.** 기본 요약은 로컬에서 처리하고, 사용자가 다른 모델의 요약도 확인하고 싶을 때 GPT를 선택할 수 있도록 구성했습니다. GPT 호출은 사용자의 버튼 클릭으로 시작하므로 필요한 기사에만 API 토큰을 사용합니다.
 
-기본 **내용 요약** 버튼은 기존 Ollama `exaone3.5:2.4b`를 호출합니다. Ollama 요약 아래 **GPT로 추가 요약** 버튼을 배치했고, 사용자가 클릭할 때만 FastAPI가 `gpt-4o-mini` Responses API를 호출합니다. GPT는 Ollama 요약문을 재요약하지 않고 **동일 기사 원문·버전·요약 언어 스냅샷**을 사용해 두 결과를 비교합니다. 영어 원문에서 한국어 요약을 직접 생성하며 별도 번역 API 호출은 없습니다.
+웹의 **내용 요약** 버튼으로 Ollama `exaone3.5:2.4b` 요약을 먼저 생성합니다. 그 아래의 **GPT로 추가 요약** 버튼을 누르면 FastAPI가 OpenAI Responses API를 호출하고, 추가 요약과 토큰 사용량·추정 비용을 MySQL에 저장한 뒤 React 화면에 표시합니다. 기존 Ollama 결과를 함께 남겨 두 요약을 읽고 비교할 수 있습니다.
+
+처리 흐름은 **React 버튼 클릭 → FastAPI → GPT-4o-mini → MySQL 저장 → Ollama 아래 추가 결과 표시**입니다. GPT에는 기존 요약문이 아닌 **동일 기사 원문·버전·요약 언어 스냅샷**을 전달합니다. 한국어 요약을 선택하면 영어 원문에서 한국어 요약을 직접 생성하며, 별도 번역 API를 호출하지 않습니다.
 
 프론트엔드는 OpenAI 키를 받지 않습니다. 백엔드 `.env`에 아래 설정을 추가하고 서버를 재시작하면 GPT 버튼을 사용할 수 있습니다. 키가 없으면 버튼은 비활성 상태이고 설정 안내를 표시합니다. 기본 Ollama 기능에는 키가 필요하지 않습니다.
 
@@ -329,13 +331,20 @@ MySQL `gpt_summaries`에 추가 요약의 대기·진행·완료·실패 상태,
 
 [OpenAI 공식 모델·가격](https://developers.openai.com/api/docs/models/gpt-4o-mini), [Responses API](https://developers.openai.com/api/docs/guides/text).
 
-## Make·Google Sheets SaaS 자동화 준비
+## Make·Google Sheets SaaS 연동: 파이프라인 구축·현재 비활성
 
-**Make 연동용 SaaS 자동화 파이프라인의 서버 코드·HTTP 처리 계약·로컬 실행 클라이언트를 구축했습니다. 현재는 웹에서 FastAPI를 직접 호출하므로 Make 자동화는 활성화하지 않았습니다. 향후 Make·Google Sheets 계정 연결, 접근 경로와 시나리오 설정을 완료한 뒤 활성화하면 같은 처리 API로 자동화를 가동할 수 있습니다.**
+**Make를 이용한 SaaS 자동화 연동을 위해 FastAPI 인증 엔드포인트, 중복 요청 제어, 워크플로 계약과 로컬 실행 클라이언트를 구축했습니다. 현재 웹 서비스는 FastAPI를 직접 호출해 분류·요약을 처리할 수 있으므로 Make는 활성화하지 않았습니다. 구축한 파이프라인은 향후 Make·Google Sheets 연결과 시나리오 설정을 완료한 뒤 가동해 뉴스 입력·요약·결과 기록을 자동화할 수 있습니다.**
+
+웹 직접 호출과 향후 Make 자동화는 같은 FastAPI 처리 코드를 사용합니다. 따라서 Make를 가동할 때도 기존 분류·요약 로직과 MySQL 저장 구조를 재사용합니다.
+
+| 처리 경로 | 현재 상태 | 가동 방식 |
+| --- | --- | --- |
+| React → FastAPI → AI → MySQL | 사용 중 | 웹에서 분류·기본 요약·GPT 추가 요약 요청 |
+| Google Sheets → Make → FastAPI → 결과 기록 | 연동 코드 구축, 자동화 비활성 | 계정·접근 경로·시나리오 연결 검증 후 활성화 |
 
 준비한 흐름은 시트 입력 → 인증된 FastAPI 기사·Ollama 요약 작업 등록 → 작업 ID로 결과 조회 → 요약·처리 상태·오류를 시트에 기록 → 원문 대조 검수입니다. 선택적으로 GPT 추가 요약 단계도 연결할 수 있습니다. 뉴스 `request_id`로 중복 제출을 제어하고 같은 ID의 다른 내용은 거부합니다. API의 `AUTOMATION_ENABLED=false`와 계약 파일의 비활성 설정을 기본값으로 유지합니다.
 
-`integrations/make/pipeline.json`은 워크플로 계약이며 Make에 바로 가져오는 blueprint는 아닙니다. 실제 Make 시나리오 배포·Google OAuth 연결·스케줄 실행은 아직 수행하지 않았습니다. 클라우드 Make는 PC의 `localhost`에 접근할 수 없어 실제 가동에는 인증된 HTTPS 접근 경로가 필요합니다. 기존 로컬 앱 전체를 그대로 공개하지 않습니다. 이것은 개인 프로젝트의 **SaaS 연동 준비 구현**이며 기업 운영 경험·효율 개선 실적으로 표현하지 않습니다.
+`integrations/make/pipeline.json`은 워크플로 계약이며 Make에 바로 가져오는 blueprint는 아닙니다. 실제 Make 시나리오 배포·Google OAuth 연결·스케줄 실행은 아직 수행하지 않았습니다. 클라우드 Make에서 로컬 서버를 호출하려면 인증된 HTTPS 접근 경로도 설정해야 합니다. 서버 측 연동 준비는 완료했으며, 이 외부 연결 설정을 마친 뒤 시나리오를 켜면 자동화를 사용할 수 있습니다.
 
 연결 단계, 시트 열, 인증·오류·검수 정책은 [Make 파이프라인 안내](integrations/make/README.md)에 정리했습니다.
 
